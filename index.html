@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Photo Booth</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      background: #f0f0f0;
+      font-family: system-ui, sans-serif;
+    }
+
+    /* ── Two views ── */
+    .view {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      padding: 20px;
+      transition: opacity 0.3s;
+    }
+    .view.hidden { opacity: 0; pointer-events: none; }
+
+    /* ── Shoot view ── */
+    #shoot-view {
+      align-items: stretch;
+      background: linear-gradient(135deg, #527ba9 0%, #466f9f 52%, #3e6593 100%);
+    }
+    .shoot-layout {
+      width: min(1180px, 100%);
+      min-height: 100%;
+      margin: auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: clamp(48px, 8vw, 118px);
+    }
+    .shoot-copy { flex: 1 1 0; min-width: 0; color: #f4f8fd; }
+    .hero-kicker {
+      display: flex; align-items: center; gap: 10px;
+      color: #54769f; font-size: .72rem; font-weight: 700;
+      letter-spacing: .18em; text-transform: uppercase; margin-bottom: 22px;
+    }
+    .hero-kicker::before { content: ""; width: 28px; height: 1px; background: #7198c3; }
+    .hero-title {
+      display: flex; flex-direction: column; align-items: flex-start;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(3.7rem, 7.1vw, 6.8rem);
+      font-weight: 700; line-height: .91; letter-spacing: -.065em;
+    }
+    .letter-row { display: flex; gap: .025em; padding: 3px 5px 8px 2px; }
+    .paper-letter {
+      display: inline-grid; place-items: center;
+      min-width: .58em; height: .72em; padding: 0 .025em;
+      color: #19477f; background: rgba(255,255,255,.72);
+      box-shadow: 0 4px 12px rgba(53,91,133,.08);
+      transform: rotate(var(--tilt, 0deg));
+    }
+    .paper-letter:nth-child(3n + 1) { background: #c5dcf5; color: #174477; }
+    .paper-letter:nth-child(3n + 2) { background: #f8fbff; color: #255993; }
+    .paper-letter:nth-child(3n) { background: #8fb4df; color: #102f56; }
+    .paper-letter:nth-child(1) { --tilt: -2deg; }
+    .paper-letter:nth-child(2) { --tilt: 1deg; }
+    .paper-letter:nth-child(3) { --tilt: -1deg; }
+    .paper-letter:nth-child(4) { --tilt: 2deg; }
+    .paper-letter:nth-child(5) { --tilt: -1deg; }
+    .paper-letter:nth-child(6) { --tilt: 1deg; }
+    .paper-letter:nth-child(7) { --tilt: -2deg; }
+    .photo-word { margin-top: 8px; color: #f1f6fc; font-size: .67em; font-style: italic; letter-spacing: -.055em; white-space: nowrap; }
+    .shoot-copy p { max-width: 390px; margin-top: 25px; color: #527095; font-size: 1rem; line-height: 1.65; }
+    .shoot-controls {
+      display: flex; flex-direction: column; align-items: center; gap: 14px;
+      flex: 0 1 auto;
+    }
+
+    .camera-wrap {
+      position: relative;
+      height: min(68vh, 680px);
+      width: auto;
+      aspect-ratio: 4/5;
+      border-radius: 14px;
+      overflow: hidden;
+      background: #14243b;
+      box-shadow: 0 22px 52px rgba(31,61,96,.24), 0 3px 12px rgba(31,61,96,.12);
+      flex-shrink: 0;
+    }
+    #video {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      display: block;
+      transform: scaleX(-1);
+    }
+    #countdown-display {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 5rem; font-weight: 700; color: #fff;
+      background: rgba(0,0,0,0.3);
+      opacity: 0; transition: opacity 0.15s;
+      pointer-events: none;
+    }
+
+    /* ── Filter pills ── */
+    .filter-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+    .f-btn {
+      padding: 8px 20px;
+      border-radius: 20px;
+      border: 1.5px solid rgba(39,79,126,.16);
+      background: rgba(255,255,255,.58);
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      color: #355b87;
+      transition: all 0.2s;
+    }
+    .f-btn.active {
+      background: #1b4778;
+      color: #ffffff;
+      border-color: #1b4778;
+      box-shadow: 0 4px 14px rgba(26,64,108,.2);
+    }
+
+    /* ── Dots ── */
+    .dots { display: flex; gap: 8px; }
+    .dot {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: rgba(35,75,122,.22); transition: background 0.25s;
+    }
+    .dot.taken  { background: #1b4778; }
+    .dot.active { background: #1b4778; animation: pulse 0.5s infinite alternate; }
+    @keyframes pulse { to { transform: scale(1.5); } }
+
+    #status { font-size: 0.78rem; color: #5a7696; min-height: 16px; }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 11px 32px; border-radius: 8px; border: none;
+      font-size: 0.88rem; font-weight: 600; cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+    .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .btn:not(:disabled):active { transform: scale(0.97); }
+    .btn-dark  { background: #111; color: #fff; }
+    .btn-light { background: #fff; color: #111; border: 1.5px solid #ccc; }
+    .btn:not(:disabled):hover { opacity: 0.85; }
+
+    #shoot-view #start-btn {
+      background: #173d6b;
+      color: #ffffff;
+      box-shadow: 0 8px 20px rgba(26,64,108,.2);
+    }
+    #shoot-view #start-btn:hover:not(:disabled) {
+      background: #245486;
+      opacity: 1;
+    }
+    .shoot-actions { display: flex; align-items: center; justify-content: center; gap: 12px; }
+    .shoot-actions .or-label { color: #5a7696; font-size: .76rem; }
+    #upload-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 10px 18px; border: 1px solid rgba(31,70,115,.28);
+      border-radius: 8px; background: rgba(255,255,255,.58);
+      color: #214b79; font: inherit; font-size: .84rem; font-weight: 650; cursor: pointer;
+      transition: background .2s, transform .1s;
+    }
+    #upload-btn:hover { background: #fff; }
+    #upload-btn:active { transform: scale(.98); }
+    #upload-btn:disabled { opacity: .5; cursor: not-allowed; }
+    #photo-upload { display: none; }
+
+    @media (max-width: 760px) {
+      html, body { height: auto; min-height: 100%; overflow: auto; }
+      #shoot-view { position: relative; min-height: 100vh; }
+      .shoot-layout { flex-direction: column; gap: 32px; padding: 30px 12px; }
+      .shoot-copy { flex: none; width: 100%; text-align: center; }
+      .hero-kicker { justify-content: center; margin-bottom: 14px; }
+      .hero-title { align-items: center; font-size: clamp(3.4rem, 13vw, 5rem); }
+      .shoot-controls { width: 100%; }
+      .camera-wrap { height: min(54vh, 500px); width: auto; max-width: 92vw; }
+      #result-view {
+        position: relative; inset: auto; min-height: 100vh; height: auto;
+        overflow: visible; flex-direction: column; justify-content: flex-start;
+        gap: 20px; padding: 18px 12px 28px;
+      }
+      .editor-stage { height: min(56vh, 540px); max-width: 100%; margin: 0 auto; }
+      .sticker-panel { width: min(100%, 520px); max-height: none; }
+      .sticker-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+
+    .btn-row { display: flex; gap: 10px; }
+
+    /* ── Result view ── */
+    #result-view {
+      flex-direction: row;
+      gap: clamp(20px, 5vw, 64px);
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(ellipse at 25% 45%, #263a62 0%, #111827 48%, #090d15 100%);
+      padding: 24px;
+    }
+
+    .editor-stage {
+      position: relative;
+      height: min(92vh, 1040px);
+      max-width: 48vw;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 1 auto;
+      filter: drop-shadow(0 18px 36px rgba(0,0,0,.45));
+    }
+    #strip-preview {
+      height: 100%;
+      width: auto;
+      max-width: 100%;
+      display: block;
+      object-fit: contain;
+      border-radius: 3px;
+      pointer-events: none;
+      user-select: none;
+    }
+    #sticker-layer {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      touch-action: none;
+    }
+    .placed-sticker {
+      position: absolute;
+      height: auto;
+      object-fit: contain;
+      cursor: grab;
+      user-select: none;
+      touch-action: none;
+      transform-origin: center;
+    }
+    .placed-sticker.selected {
+      outline: 1px dashed rgba(255,255,255,.9);
+      filter: drop-shadow(0 2px 5px rgba(0,0,0,.35));
+    }
+
+    .sticker-panel {
+      width: min(400px, 42vw);
+      max-height: calc(100vh - 48px);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      padding: 22px;
+      color: #f8fafc;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 20px;
+      background: rgba(255,255,255,.075);
+      backdrop-filter: blur(18px);
+      box-shadow: 0 18px 50px rgba(0,0,0,.22);
+    }
+    .panel-heading { display: flex; justify-content: space-between; align-items: center; }
+    .panel-heading h2 { font-size: 1.15rem; }
+    .panel-heading p { color: rgba(255,255,255,.62); font-size: .78rem; margin-top: 3px; }
+    .sticker-tabs { display: flex; gap: 8px; }
+    .border-picker { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .border-picker-label { color: rgba(255,255,255,.75); font-size: .8rem; }
+    .border-swatches { display: flex; gap: 8px; }
+    .border-swatch {
+      width: 28px; height: 28px; border-radius: 50%;
+      border: 2px solid rgba(255,255,255,.35);
+      cursor: pointer; position: relative;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.14);
+    }
+    .border-swatch[aria-pressed="true"] { outline: 2px solid #fff; outline-offset: 3px; }
+    .border-swatch[data-color="white"] { background: #fff; }
+    .border-swatch[data-color="blue"] { background: #1a1f6e; }
+    .border-swatch[data-color="yellow"] { background: #f4c542; }
+    .border-swatch[data-color="black"] { background: #000; }
+    .sticker-tab, .tool-btn {
+      border: 1px solid rgba(255,255,255,.17);
+      border-radius: 999px;
+      padding: 8px 14px;
+      color: #e5e7eb;
+      background: rgba(0,0,0,.18);
+      cursor: pointer;
+      font: inherit;
+      font-size: .8rem;
+    }
+    .sticker-tab.active { background: #fff; color: #172033; border-color: #fff; }
+    .sticker-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      overflow: auto;
+      min-height: 100px;
+      padding: 2px;
+    }
+    .sticker-choice {
+      aspect-ratio: 1;
+      display: grid;
+      place-items: center;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.08);
+      cursor: pointer;
+      transition: transform .15s, background .15s;
+    }
+    .sticker-choice:hover { transform: translateY(-2px); background: rgba(255,255,255,.16); }
+    .sticker-choice img { width: 82%; height: 82%; object-fit: contain; }
+    .sticker-tools { display: flex; gap: 7px; flex-wrap: wrap; }
+    .tool-btn:disabled { opacity: .38; cursor: not-allowed; }
+    .tool-btn.remove { color: #fecaca; }
+    .panel-footer { margin-top: auto; display: flex; flex-direction: column; gap: 10px; }
+    .panel-footer .btn-row { flex-wrap: wrap; }
+    .panel-footer .btn { padding: 10px 14px; font-size: .8rem; }
+    .editor-hint { color: rgba(255,255,255,.55); font-size: .72rem; min-height: 16px; }
+
+    @media (max-width: 760px) {
+      .view.hidden { display: none; }
+      #result-view {
+        position: relative; inset: auto; min-height: 100vh; height: auto;
+        overflow: visible; flex-direction: column; justify-content: flex-start;
+        gap: 20px; padding: 18px 12px 28px;
+      }
+      .editor-stage { height: min(56vh, 540px); max-width: 100%; margin: 0 auto; }
+      .sticker-panel { width: min(100%, 520px); max-height: none; padding: 14px; gap: 12px; }
+      .sticker-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    @media (max-width: 480px) {
+      #result-view { align-items: center; padding: 14px 10px 24px; gap: 14px; }
+      .editor-stage { height: min(52vh, 460px); max-width: 100%; margin: 0 auto; }
+      .sticker-panel { width: min(100%, 520px); max-height: none; padding: 14px; gap: 10px; }
+      .sticker-grid { gap: 6px; }
+      .panel-heading h2 { font-size: .98rem; }
+      .panel-heading p { font-size: .68rem; }
+      .sticker-tab, .tool-btn { padding: 7px 10px; font-size: .72rem; }
+      .panel-footer .btn { padding: 8px 9px; font-size: .72rem; }
+      .shoot-actions { gap: 8px; flex-wrap: wrap; }
+      #upload-btn { padding: 10px 13px; }
+    }
+
+    .result-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      align-items: flex-start;
+    }
+    .result-actions h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 4px;
+    }
+    #result-view .btn-light {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      border-color: rgba(255,255,255,0.2);
+    }
+
+    /* Flash */
+    .flash {
+      position: fixed; inset: 0; background: #fff;
+      opacity: 0; pointer-events: none; z-index: 999;
+      transition: opacity 0.08s;
+    }
+    .flash.go { opacity: 1; }
+
+    canvas { display: none; }
+  </style>
+</head>
+<body>
+
+<div class="flash" id="flash"></div>
+<canvas id="proc"></canvas>
+<canvas id="strip-canvas"></canvas>
+
+<!-- ═══ SHOOT VIEW ═══ -->
+<div class="view" id="shoot-view">
+  <div class="shoot-layout">
+    <section class="shoot-copy" aria-label="Digital photobooth">
+      <h1 class="hero-title" aria-label="Digital photobooth">
+        <span class="letter-row" aria-hidden="true"><span class="paper-letter">d</span><span class="paper-letter">i</span><span class="paper-letter">g</span><span class="paper-letter">i</span><span class="paper-letter">t</span><span class="paper-letter">a</span><span class="paper-letter">l</span></span>
+        <span class="photo-word">photobooth</span>
+      </h1>
+    </section>
+    <section class="shoot-controls" aria-label="Photobooth camera controls">
+      <div class="camera-wrap">
+        <video id="video" autoplay muted playsinline></video>
+        <div id="countdown-display"></div>
+      </div>
+
+      <div class="filter-row">
+        <button class="f-btn active" data-f="blue-halftone" onclick="pickFilter(this)">Blue Filter</button>
+        <button class="f-btn"        data-f="warm-yellow"   onclick="pickFilter(this)">Warm Filter</button>
+      </div>
+
+      <div class="dots">
+        <div class="dot" id="d0"></div>
+        <div class="dot" id="d1"></div>
+        <div class="dot" id="d2"></div>
+        <div class="dot" id="d3"></div>
+      </div>
+
+      <div id="status">Choose a filter, then start or upload 4 photos</div>
+      <div class="shoot-actions">
+        <button class="btn btn-dark" id="start-btn" onclick="startSession()">▶ Start</button>
+        <span class="or-label">or</span>
+        <button id="upload-btn" type="button" onclick="openPhotoPicker()">↑ Upload 4 photos</button>
+        <input id="photo-upload" type="file" accept="image/*" multiple onchange="uploadPhotos(this)" />
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ═══ RESULT VIEW ═══ -->
+<div class="view hidden" id="result-view">
+  <div class="editor-stage" id="editor-stage">
+    <img id="strip-preview" src="" alt="Photo strip to decorate" />
+    <div id="sticker-layer" aria-label="Sticker canvas"></div>
+  </div>
+  <section class="sticker-panel" aria-label="Sticker editor">
+    <div class="panel-heading"><div><h2>Make it yours ✦</h2><p>Pick a sticker, then drag it onto your strip.</p></div></div>
+    <div class="sticker-tabs" role="tablist" aria-label="Sticker collections">
+      <button class="sticker-tab active" data-collection="blue" onclick="showStickerCollection('blue')">Blue</button>
+      <button class="sticker-tab" data-collection="yellow" onclick="showStickerCollection('yellow')">Yellow</button>
+    </div>
+    <div class="border-picker">
+      <span class="border-picker-label">Photo strip border</span>
+      <div class="border-swatches" role="group" aria-label="Photo strip border color">
+        <button class="border-swatch" data-color="blue" aria-label="Blue border" aria-pressed="false" onclick="setBorderColor('blue')"></button>
+        <button class="border-swatch" data-color="yellow" aria-label="Yellow border" aria-pressed="false" onclick="setBorderColor('yellow')"></button>
+        <button class="border-swatch" data-color="white" aria-label="White border" aria-pressed="true" onclick="setBorderColor('white')"></button>
+        <button class="border-swatch" data-color="black" aria-label="Black border" aria-pressed="false" onclick="setBorderColor('black')"></button>
+      </div>
+    </div>
+    <div class="sticker-grid" id="sticker-grid"></div>
+    <div class="sticker-tools" aria-label="Selected sticker tools">
+      <button class="tool-btn" onclick="resizeSelected(-0.04)" id="smaller-btn" disabled title="Make smaller">− Size</button>
+      <button class="tool-btn" onclick="resizeSelected(0.04)" id="larger-btn" disabled title="Make larger">＋ Size</button>
+      <button class="tool-btn" onclick="rotateSelected(-15)" id="rotate-left-btn" disabled title="Rotate left">↶</button>
+      <button class="tool-btn" onclick="rotateSelected(15)" id="rotate-right-btn" disabled title="Rotate right">↷</button>
+      <button class="tool-btn remove" onclick="removeSelectedSticker()" id="remove-sticker-btn" disabled>Remove</button>
+    </div>
+    <div class="panel-footer">
+      <div class="editor-hint" id="editor-hint">Choose a sticker to get started.</div>
+      <div class="btn-row">
+        <button class="btn btn-dark" onclick="downloadPNG()">⬇ Save PNG</button>
+        <button class="btn btn-light" onclick="downloadPDF()">📄 Save PDF</button>
+        <button class="btn btn-light" onclick="goBack()">↩ Retake</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let stream;
+  let photos        = [];
+  let activeFilter  = 'blue-halftone';
+  let sessionActive = false;
+  let cancelSession = false;
+  let stickerCollection = 'blue';
+  let stickers = [];
+  let selectedStickerId = null;
+  let nextStickerId = 1;
+  let borderColor = 'white';
+  const borderColors = { blue: '#1a1f6e', yellow: '#f4c542', white: '#ffffff', black: '#000000' };
+
+  const stickerAssets = {
+    blue: [
+      { src: 'blue/The_1975_tape-removebg-preview.png', name: 'The 1975 tape' },
+      { src: 'blue/_-removebg-preview.png', name: 'Blue cutout' },
+      { src: 'blue/_-removebg-preview (1).png', name: 'Blue sticker 2' },
+      { src: 'blue/___1_-removebg-preview.png', name: 'Blue sticker 3' },
+      { src: 'blue/___2_-removebg-preview.png', name: 'Blue sticker 4' }
+    ],
+    yellow: [
+      { src: 'yellow/Yellow_Newspaper_Star_Ripped_Paper_Cutout_for_Halloween_Retro_PNG-removebg-preview.png', name: 'Newspaper star' },
+      { src: 'yellow/_-removebg-preview.png', name: 'Yellow cutout' },
+      { src: 'yellow/___1_-removebg-preview.png', name: 'Yellow sticker 2' },
+      { src: 'yellow/___1_-removebg-preview (1).png', name: 'Yellow sticker 3' },
+      { src: 'yellow/___2_-removebg-preview.png', name: 'Yellow sticker 4' }
+    ]
+  };
+
+  const video   = document.getElementById('video');
+  const proc    = document.getElementById('proc');
+  const ctx     = proc.getContext('2d', { willReadFrequently: true });
+  const flashEl = document.getElementById('flash');
+
+  /* ── Camera ── */
+  async function startCamera() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width:{ideal:1280}, height:{ideal:960} },
+        audio: false
+      });
+      video.srcObject = stream;
+    } catch { setStatus('⚠ Camera access denied'); }
+  }
+
+  /* ── Filter pick — resets session if running ── */
+  function pickFilter(el) {
+    document.querySelectorAll('.f-btn').forEach(b => b.classList.remove('active'));
+    el.classList.add('active');
+    activeFilter = el.dataset.f;
+    if (sessionActive) {
+      cancelSession = true;
+      photos = [];
+      resetDots();
+      setStatus('Filter changed — click Start to begin');
+    }
+  }
+
+  /* ── Session ── */
+  async function startSession() {
+    if (!stream) await startCamera();
+    photos = [];
+    cancelSession = false;
+    sessionActive = true;
+    document.getElementById('start-btn').disabled = true;
+    setUploadDisabled(true);
+    resetDots();
+    setStatus('Get ready…');
+
+    for (let i = 0; i < 4; i++) {
+      if (cancelSession) break;
+      markDot(i, 'active');
+      await countdown(i);
+      if (cancelSession) break;
+      await capture(i);
+    }
+
+    sessionActive = false;
+    document.getElementById('start-btn').disabled = false;
+    setUploadDisabled(false);
+
+    if (!cancelSession && photos.length === 4) {
+      await showResult();
+    } else {
+      setStatus('Ready — click Start to begin');
+      resetDots();
+    }
+  }
+
+  async function uploadPhotos(input) {
+    const files = [...input.files];
+    input.value = '';
+    if (files.length !== 4) {
+      setStatus('Please choose exactly 4 photos.');
+      return;
+    }
+    if (sessionActive) return;
+
+    photos = [];
+    cancelSession = false;
+    sessionActive = true;
+    document.getElementById('start-btn').disabled = true;
+    setUploadDisabled(true);
+    resetDots();
+    try {
+      for (let i = 0; i < files.length; i++) {
+        setStatus(`Preparing photo ${i + 1} of 4…`);
+        markDot(i, 'active');
+        const objectUrl = URL.createObjectURL(files[i]);
+        try {
+          const image = await loadImage(objectUrl);
+          const sourceW = image.naturalWidth;
+          const sourceH = image.naturalHeight;
+          const targetRatio = 4 / 5;
+          let sx = 0, sy = 0, sw = sourceW, sh = sourceH;
+          if (sourceW / sourceH > targetRatio) {
+            sw = sourceH * targetRatio;
+            sx = (sourceW - sw) / 2;
+          } else {
+            sh = sourceW / targetRatio;
+            sy = (sourceH - sh) / 2;
+          }
+          const W = 960, H = 1200;
+          proc.width = W; proc.height = H;
+          ctx.drawImage(image, sx, sy, sw, sh, 0, 0, W, H);
+          if (activeFilter === 'blue-halftone') applyBlueHalftone(ctx, W, H);
+          if (activeFilter === 'warm-yellow') applyWarmYellow(ctx, W, H);
+          photos[i] = proc.toDataURL('image/png');
+        } finally {
+          URL.revokeObjectURL(objectUrl);
+        }
+        markDot(i, 'taken');
+      }
+      setStatus('Your four photos are ready!');
+      await showResult();
+    } catch (error) {
+      photos = [];
+      resetDots();
+      setStatus('Could not load those photos. Please try again.');
+    } finally {
+      sessionActive = false;
+      document.getElementById('start-btn').disabled = false;
+      setUploadDisabled(false);
+    }
+  }
+
+  function setUploadDisabled(disabled) {
+    const input = document.getElementById('photo-upload');
+    const button = document.getElementById('upload-btn');
+    if (input) input.disabled = disabled;
+    if (button) button.disabled = disabled;
+  }
+
+  function openPhotoPicker() {
+    if (!sessionActive) document.getElementById('photo-upload').click();
+  }
+
+  async function countdown(shotIdx) {
+    const el = document.getElementById('countdown-display');
+    for (let n = 3; n >= 1; n--) {
+      if (cancelSession) { el.style.opacity = 0; return; }
+      el.textContent = n;
+      el.style.opacity = 1;
+      setStatus(`Photo ${shotIdx + 1} of 4 — ${n}…`);
+      await wait(1000);
+    }
+    el.style.opacity = 0;
+  }
+
+  async function capture(idx) {
+    flashEl.classList.add('go');
+    await wait(80);
+    flashEl.classList.remove('go');
+
+    const sourceW = video.videoWidth || 640;
+    const sourceH = video.videoHeight || 480;
+    const targetRatio = 4 / 5;
+    let sx = 0, sy = 0, sw = sourceW, sh = sourceH;
+    if (sourceW / sourceH > targetRatio) {
+      sw = sourceH * targetRatio;
+      sx = (sourceW - sw) / 2;
+    } else {
+      sh = sourceW / targetRatio;
+      sy = (sourceH - sh) / 2;
+    }
+    const W = 960, H = 1200;
+    proc.width = W; proc.height = H;
+
+    ctx.save();
+    ctx.translate(W, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, W, H);
+    ctx.restore();
+
+    if (activeFilter === 'blue-halftone') applyBlueHalftone(ctx, W, H);
+    if (activeFilter === 'warm-yellow')   applyWarmYellow(ctx, W, H);
+
+    photos[idx] = proc.toDataURL('image/png');
+    markDot(idx, 'taken');
+    setStatus(`Shot ${idx + 1} captured!`);
+    await wait(300);
+  }
+
+  /* ══════════════════════════════════════
+     FILTER 1 — Blue Halftone
+  ══════════════════════════════════════ */
+  function applyBlueHalftone(ctx, W, H) {
+    const img = ctx.getImageData(0, 0, W, H);
+    const d   = img.data;
+    for (let i = 0; i < d.length; i += 4) {
+      let lum = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+      lum = Math.max(0, Math.min(255, (lum - 128) * 1.5 + 128));
+      const t = lum / 255;
+      d[i]   = Math.round(26  + t * (192 - 26));
+      d[i+1] = Math.round(31  + t * (202 - 31));
+      d[i+2] = Math.round(110 + t * (255 - 110));
+    }
+    const sp = Math.max(4, Math.round(W / 90));
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const gx = x % sp, gy = y % sp, c = sp / 2;
+        const dist = Math.sqrt((gx-c)**2 + (gy-c)**2);
+        const i    = (y * W + x) * 4;
+        const lum  = (d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114) / 255;
+        if (dist < (1 - lum) * c * 1.15) {
+          d[i]   = Math.round(d[i]   * 0.3);
+          d[i+1] = Math.round(d[i+1] * 0.3);
+          d[i+2] = Math.round(d[i+2] * 0.5);
+        }
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
+  /* ══════════════════════════════════════
+     FILTER 2 — Warm Yellow (vintage 70s golden photobooth)
+     Golden amber wash · warm skin tones · deep rich blacks
+     creamy highlights · analog film grain
+  ══════════════════════════════════════ */
+  function applyWarmYellow(ctx, W, H) {
+    const img = ctx.getImageData(0, 0, W, H);
+    const d   = img.data;
+
+    for (let i = 0; i < d.length; i += 4) {
+      const r = d[i], g = d[i+1], b = d[i+2];
+
+      // 1. Contrast & warm grading
+      let cr = (r - 128) * 1.22 + 128;
+      let cg = (g - 128) * 1.22 + 128;
+      let cb = (b - 128) * 1.22 + 128;
+
+      let wr = cr * 1.16 + 18;
+      let wg = cg * 1.08 + 12;
+      let wb = cb * 0.62 - 12;
+
+      // 2. Golden analog duotone blend
+      const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      const goldR = lum < 0.5 ? (22 + lum * 2 * (195 - 22)) : (195 + (lum - 0.5) * 2 * (255 - 195));
+      const goldG = lum < 0.5 ? (18 + lum * 2 * (165 - 18)) : (165 + (lum - 0.5) * 2 * (242 - 165));
+      const goldB = lum < 0.5 ? (8  + lum * 2 * (75  - 8))  : (75  + (lum - 0.5) * 2 * (185 - 75));
+
+      // 3. Composite 55% graded color + 45% golden wash
+      let finalR = wr * 0.55 + goldR * 0.45;
+      let finalG = wg * 0.55 + goldG * 0.45;
+      let finalB = wb * 0.55 + goldB * 0.45;
+
+      d[i]   = Math.max(0, Math.min(255, finalR));
+      d[i+1] = Math.max(0, Math.min(255, finalG));
+      d[i+2] = Math.max(0, Math.min(255, finalB));
+    }
+    ctx.putImageData(img, 0, 0);
+
+    // Subtle vignette
+    const vcx = W/2, vcy = H/2, vmax = Math.sqrt(vcx*vcx + vcy*vcy);
+    const vd  = ctx.getImageData(0, 0, W, H);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i   = (y*W+x)*4;
+        const vig = 1 - Math.pow(Math.sqrt(((x-vcx)/vmax)**2+((y-vcy)/vmax)**2), 2.2) * 0.4;
+        vd.data[i]   = Math.max(0, Math.min(255, vd.data[i]   * vig));
+        vd.data[i+1] = Math.max(0, Math.min(255, vd.data[i+1] * vig));
+        vd.data[i+2] = Math.max(0, Math.min(255, vd.data[i+2] * vig));
+      }
+    }
+    ctx.putImageData(vd, 0, 0);
+
+    // Analog film grain
+    const grain = ctx.getImageData(0, 0, W, H);
+    const gd = grain.data;
+    for (let i = 0; i < gd.length; i += 4) {
+      const n = (Math.random()-0.5) * 16;
+      gd[i]   = Math.max(0, Math.min(255, gd[i]+n));
+      gd[i+1] = Math.max(0, Math.min(255, gd[i+1]+n));
+      gd[i+2] = Math.max(0, Math.min(255, gd[i+2]+n));
+    }
+    ctx.putImageData(grain, 0, 0);
+  }
+
+  /* ══════════════════════════════════════
+     BUILD STRIP — real photobooth layout:
+     Pure white strip · photos fill the width
+     thin white gaps between shots · no thick bars
+  ══════════════════════════════════════ */
+  async function buildStripCanvas(includeStickers = true) {
+    const photoW  = 420;
+    const photoH  = Math.round(photoW * 5 / 4);
+    const border  = 44;
+    const gap     = 28;
+    const radius  = 14;    // soft paper corners
+    const totalW  = photoW + border * 2;
+    const totalH  = border + photoH * 4 + gap * 3 + border;
+
+    const sc  = document.getElementById('strip-canvas');
+    sc.width  = totalW;
+    sc.height = totalH;
+    const sc2 = sc.getContext('2d');
+
+    sc2.clearRect(0, 0, totalW, totalH);
+
+    // Clip entire strip to rounded rect
+    sc2.beginPath();
+    sc2.roundRect(0, 0, totalW, totalH, radius);
+    sc2.clip();
+
+    // The paper frame and gutters share the selected print color.
+    sc2.fillStyle = borderColors[borderColor];
+    sc2.fillRect(0, 0, totalW, totalH);
+
+    // Photos sit inside a broad paper frame with even gutters.
+    await Promise.all(photos.map((url, i) => new Promise(res => {
+      const img = new Image();
+      img.onload = () => {
+        sc2.drawImage(img, border, border + i * (photoH + gap), photoW, photoH);
+        res();
+      };
+      img.src = url;
+    })));
+
+    if (includeStickers) await Promise.all(stickers.map(async sticker => {
+      const img = await loadImage(sticker.src);
+      const w = sticker.w * totalW;
+      const h = w * img.height / img.width;
+      const x = sticker.x * totalW;
+      const y = sticker.y * totalH;
+      sc2.save();
+      sc2.translate(x + w / 2, y + h / 2);
+      sc2.rotate(sticker.rotation * Math.PI / 180);
+      sc2.drawImage(img, -w / 2, -h / 2, w, h);
+      sc2.restore();
+    }));
+    return sc;
+  }
+
+  /* ── Show result ── */
+  async function showResult() {
+    const sc = await buildStripCanvas(false);
+    stickers = [];
+    selectedStickerId = null;
+    document.getElementById('strip-preview').src = sc.toDataURL('image/png');
+    renderStickers();
+    showStickerCollection(stickerCollection);
+    document.getElementById('shoot-view').classList.add('hidden');
+    document.getElementById('result-view').classList.remove('hidden');
+  }
+
+  function goBack() {
+    photos = [];
+    stickers = [];
+    selectedStickerId = null;
+    resetDots();
+    setStatus('Choose a filter, then start or upload 4 photos');
+    document.getElementById('result-view').classList.add('hidden');
+    document.getElementById('shoot-view').classList.remove('hidden');
+  }
+
+  async function downloadPNG() {
+    const sc = await buildStripCanvas();
+    const a  = document.createElement('a');
+    a.download = `photobooth-${Date.now()}.png`;
+    a.href = sc.toDataURL('image/png');
+    a.click();
+  }
+
+  async function downloadPDF() {
+    const sc  = await buildStripCanvas();
+    const { jsPDF } = window.jspdf;
+    const mm  = 0.264583;
+    const pdf = new jsPDF({ unit:'mm', format:[sc.width*mm, sc.height*mm] });
+    pdf.addImage(sc.toDataURL('image/png'), 'PNG', 0, 0, sc.width*mm, sc.height*mm);
+    pdf.save(`photobooth-${Date.now()}.pdf`);
+  }
+
+  function showStickerCollection(collection) {
+    stickerCollection = collection;
+    document.querySelectorAll('.sticker-tab').forEach(button => {
+      const active = button.dataset.collection === collection;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', active);
+    });
+    const grid = document.getElementById('sticker-grid');
+    grid.replaceChildren();
+    stickerAssets[collection].forEach(asset => {
+      const button = document.createElement('button');
+      button.className = 'sticker-choice';
+      button.type = 'button';
+      button.title = `Add ${asset.name}`;
+      button.setAttribute('aria-label', `Add ${asset.name}`);
+      const img = document.createElement('img');
+      img.src = asset.src;
+      img.alt = asset.name;
+      button.append(img);
+      button.addEventListener('click', () => addSticker(asset));
+      grid.append(button);
+    });
+  }
+
+  async function setBorderColor(color) {
+    borderColor = color;
+    document.querySelectorAll('.border-swatch').forEach(button => {
+      button.setAttribute('aria-pressed', button.dataset.color === color);
+    });
+    const preview = document.getElementById('strip-preview');
+    if (preview.src) {
+      const sc = await buildStripCanvas(false);
+      preview.src = sc.toDataURL('image/png');
+    }
+  }
+
+  function addSticker(asset) {
+    const sticker = { id: nextStickerId++, src: asset.src, name: asset.name, x: 0.38, y: 0.28, w: 0.24, rotation: 0 };
+    stickers.push(sticker);
+    selectedStickerId = sticker.id;
+    renderStickers();
+    setEditorHint(`${asset.name} added — drag it to place.`);
+  }
+
+  function renderStickers() {
+    const layer = document.getElementById('sticker-layer');
+    if (!layer) return;
+    layer.replaceChildren();
+    stickers.forEach(sticker => {
+      const img = document.createElement('img');
+      img.className = `placed-sticker${sticker.id === selectedStickerId ? ' selected' : ''}`;
+      img.src = sticker.src;
+      img.alt = sticker.name;
+      img.draggable = false;
+      img.style.left = `${sticker.x * 100}%`;
+      img.style.top = `${sticker.y * 100}%`;
+      img.style.width = `${sticker.w * 100}%`;
+      img.style.transform = `rotate(${sticker.rotation}deg)`;
+      img.addEventListener('pointerdown', event => beginStickerDrag(event, sticker.id));
+      img.addEventListener('click', event => { event.stopPropagation(); selectSticker(sticker.id); });
+      layer.append(img);
+    });
+    updateStickerTools();
+    layer.onclick = () => { selectedStickerId = null; renderStickers(); setEditorHint('Choose a sticker to get started.'); };
+  }
+
+  function beginStickerDrag(event, id) {
+    event.preventDefault();
+    event.stopPropagation();
+    selectedStickerId = id;
+    event.currentTarget.classList.add('selected');
+    updateStickerTools();
+    const sticker = stickers.find(item => item.id === id);
+    const layer = document.getElementById('sticker-layer');
+    const element = event.currentTarget;
+    const bounds = layer.getBoundingClientRect();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const originX = sticker.x;
+    const originY = sticker.y;
+    const onMove = moveEvent => {
+      sticker.x = Math.max(0, Math.min(1 - sticker.w, originX + (moveEvent.clientX - startX) / bounds.width));
+      const img = [...layer.querySelectorAll('.placed-sticker')].find(item => item.alt === sticker.name);
+      const ratio = img && img.naturalWidth ? img.naturalHeight / img.naturalWidth : 1;
+      const h = sticker.w * bounds.width * ratio / bounds.height;
+      sticker.y = Math.max(0, Math.min(1 - h, originY + (moveEvent.clientY - startY) / bounds.height));
+      element.style.left = `${sticker.x * 100}%`;
+      element.style.top = `${sticker.y * 100}%`;
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp, { once: true });
+  }
+
+  function selectSticker(id) {
+    selectedStickerId = id;
+    renderStickers();
+    const sticker = stickers.find(item => item.id === id);
+    if (sticker) setEditorHint(`${sticker.name} selected — drag, resize, or rotate it.`);
+  }
+
+  function resizeSelected(amount) {
+    const sticker = stickers.find(item => item.id === selectedStickerId);
+    if (!sticker) return;
+    sticker.w = Math.max(0.08, Math.min(0.7, sticker.w + amount));
+    renderStickers();
+  }
+
+  function rotateSelected(degrees) {
+    const sticker = stickers.find(item => item.id === selectedStickerId);
+    if (!sticker) return;
+    sticker.rotation += degrees;
+    renderStickers();
+  }
+
+  function removeSelectedSticker() {
+    stickers = stickers.filter(item => item.id !== selectedStickerId);
+    selectedStickerId = null;
+    renderStickers();
+    setEditorHint('Sticker removed. Choose another one to add it.');
+  }
+
+  function updateStickerTools() {
+    const disabled = selectedStickerId === null;
+    ['smaller-btn', 'larger-btn', 'rotate-left-btn', 'rotate-right-btn', 'remove-sticker-btn'].forEach(id => {
+      document.getElementById(id).disabled = disabled;
+    });
+  }
+
+  function setEditorHint(message) {
+    const hint = document.getElementById('editor-hint');
+    if (hint) hint.textContent = message;
+  }
+
+  function loadImage(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = src;
+    });
+  }
+
+  /* ── Dot helpers ── */
+  function resetDots() {
+    for (let i = 0; i < 4; i++) document.getElementById(`d${i}`).className = 'dot';
+  }
+  function markDot(idx, state) {
+    for (let i = 0; i < 4; i++) {
+      const d = document.getElementById(`d${i}`);
+      d.className = 'dot';
+      if (photos[i]) d.classList.add('taken');
+    }
+    document.getElementById(`d${idx}`).classList.add(state);
+  }
+
+  function setStatus(msg) { document.getElementById('status').textContent = msg; }
+  function wait(ms)       { return new Promise(r => setTimeout(r, ms)); }
+
+  startCamera();
+</script>
+</body>
+</html>
